@@ -1,15 +1,3 @@
-# Mocked PySpark
-
-The objective of this project is to create a library that wraps arround the PySpark API to make it more testable 
-
-With "testable", it means that through the library, the user will be able to mock tables and mimic some sql commands.
-
-
-## Mocking a table
-
-The code bellow shows how to mimic a table with a partitioning on the fields "column_1" and "column_2"
-
-```python
 from pyspark.sql import SparkSession
 from mocked_pyspark import MockedSparkSession
 
@@ -43,6 +31,3 @@ mocked_tables = {
 
 spark_session = SparkSession.builder.getOrCreate()
 mocked_spark_session = MockedSparkSession(spark_session, mocked_tables)
-```
-
-
