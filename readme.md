@@ -42,6 +42,8 @@ mocked_tables = {
 
 spark_session = SparkSession.builder.getOrCreate()
 mocked_spark_session = MockedSparkSession(spark_session, mocked_tables)
+
+run_app(mocked_spark_session)
 ```
 
 
