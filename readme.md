@@ -32,12 +32,11 @@ mocked_tables = {
             (1, 3, 300.0),
         ],
         "struct": t.StructType([
-            t.StructField("cag_bcria", t.IntegerType(), True),
-            t.StructField("ncta_bcria", t.IntegerType(), True),
-            t.StructField("valor", t.FloatType(), True),
-            t.StructField("cid_trans", t.StringType(), True),
+            t.StructField("column_1", t.IntegerType(), True),
+            t.StructField("column_2", t.IntegerType(), True),
+            t.StructField("column_3", t.FloatType(), True)
         ]),
-        "partition_by": ["cag_bcria", "ncta_bcria"]
+        "partition_by": ["column_1", "column_2"]
     }
 }
 
