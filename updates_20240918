@@ -1,0 +1,203 @@
+import sys
+sys.path.append("D:\\10_outros\\")
+
+import utils as u
+
+
+
+engine, metadata = u.get_sql_alchemy_engine()
+result = u.run_job_from_http("http://localhost", 8091, "pp_aaig_tb_5000_iv_invt_cadt")
+u.log_script_execution(engine, metadata, result["return_code"], verbose = True)
+u.write_log_to_file(result["terminal_output"], verbose = True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+from .get_sql_alchemy_engine import get_sql_alchemy_engine
+from .log_script_execution import log_script_execution
+from .log import log
+from .run_job_from_http import run_job_from_http
+from .write_log_to_file import write_log_to_file
+
+
+
+
+
+
+import urllib
+import sqlalchemy as sa
+from typing import Tuple
+
+
+
+def get_sql_alchemy_engine(set_meta_data: bool = True) -> Tuple[sa.Engine, sa.MetaData]:
+    # Define connection parameters
+    driver = 'ODBC Driver 17 for SQL Server'
+    server = 'localhost'
+    database = 'master'
+    
+    # URL encode the driver and other parameters
+    params = urllib.parse.quote_plus(f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};Trusted_Connection=yes;")
+    
+    # Construct the database URI
+    DATABASE_URI = f"mssql+pyodbc:///?odbc_connect={params}"
+    
+    # Create the engine
+    engine = sa.create_engine(DATABASE_URI)
+    metadata = sa.MetaData()
+
+    if (set_meta_data):
+        sa.Table('TB_LIWS_LOGS', metadata,
+            sa.Column('EXECTION_TIME', sa.DateTime, nullable=False),
+            sa.Column('SCRIPT_ID', sa.String(128), nullable=False),
+            sa.Column('SCRIPT_RETURN', sa.Integer)
+        )
+
+    return engine, metadata
+
+
+
+
+
+
+
+
+
+
+
+from .log import log
+from datetime import datetime
+from typing import Optional
+
+import sqlalchemy as sa
+import sys
+
+
+def log_script_execution(engine: sa.Engine, metadata: sa.MetaData, script_return: int, script_name: Optional[str] = None, verbose: bool = False) -> None:
+    script_id: str = None
+    if (script_name is None):
+        (log(f"Obtendo nome do script a partir do sys.argv.") if verbose else None)
+        script_id = sys.argv[0].split("\\")[-1]
+    else:
+        script_id = script_name
+    (log(f"O ID do script é: {script_id}.") if verbose else None)
+
+
+    insert_statement = sa.insert(
+        metadata.tables["TB_LIWS_LOGS"]
+    ).values(
+        EXECTION_TIME = datetime.now(),
+        SCRIPT_ID = script_id,
+        SCRIPT_RETURN = script_return
+    )
+    
+
+    (log("Iniciando inserção dos dados na tabela de logs de execuções.") if verbose else None)
+    with engine.connect() as connection:
+        connection.execute(insert_statement)
+        connection.commit()
+    (log("Dados inseridos na tabela de logs com sucesso.") if verbose else None)
+
+
+
+
+
+
+
+
+
+
+
+
+from .log import log
+from typing import Dict
+
+import urllib.parse
+import requests
+
+
+
+
+def run_job_from_http(url: str, port: int, job_name: str, verbose: bool = False) -> Dict:
+    request_url: str = f"{url}:{port}/api/run_job?{urllib.parse.urlencode({ 'job_name': job_name })}"
+    (log(f"Será feita a requisição do tipo GET para o endereço: {request_url}") if verbose else None)
+
+
+    (log(f"Iniciando a requisição para execução do job") if verbose else None)
+    response = requests.get(request_url)
+    (log(f"Requisição finalizada") if verbose else None)
+    
+
+    if response.status_code == 200:
+        (log(f"Requisição bem sucedida.") if verbose else None)
+        return response.json()
+    
+    raise Exception(f"A requisição para execução do JOB não foi bem sucedida. O retorno foi: {response.text}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+from .log import log
+from datetime import datetime
+from typing import Optional
+
+import os
+import sys
+
+
+
+def write_log_to_file(content: str, base_path: Optional[str] = None, verbose: bool = True):
+    log_files_base_path: str = None
+    if (base_path is None):
+        log_files_base_path = sys.path[0]
+    else:
+        log_files_base_path = base_path
+    log_files_base_path = os.path.join(log_files_base_path, "logs")
+    (log(f"O diretório dos arquivos de logs será: {log_files_base_path}.") if verbose else None)
+
+    
+    if not os.path.exists(log_files_base_path):
+        (log("O diretório para os logs não existe, portanto, ele será criado.") if verbose else None)
+        os.makedirs(log_files_base_path)
+    
+    
+    file_name: str = f"log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    (log(f"O nome do arquivo de log será: {file_name}.") if verbose else None)
+    with open(os.path.join(log_files_base_path, file_name), "w") as file:
+        file.write(content)
+    (log("Arquivo de logs criado com sucesso.") if verbose else None)
+    
+
+
+
+
+
+CREATE TABLE [dbo].[TB_LIWS_LOGS] (
+	[EXECTION_TIME] [datetime] NOT NULL,
+	[SCRIPT_ID] [varchar](128) NOT NULL,
+	[SCRIPT_RETURN] [int] NULL
+)
