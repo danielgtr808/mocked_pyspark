@@ -1,0 +1,137 @@
+import sys
+sys.path.append("D:\\10_outros\\")
+
+
+
+from datetime import datetime
+from itertools import islice
+from typing import Tuple
+
+import os
+import pyodbc
+import sqlalchemy as sa
+import utils as u
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def get_or_insert_ref_into_ctrl(file_ref: str, engine: sa.Engine, metadata: sa.MetaData, verbose: bool = True) -> None:
+    tb_rco_file_ctrl = sa.Table("TB_RCO_FILE_CTRL", metadata, autoload_with=engine)
+    
+    with engine.begin() as connection:
+        (u.log("Iniciando query para verificar se a referência \"{file_ref}\" existe na tabela.") if verbose else None)
+        select_result = connection.execute(sa.select(
+            tb_rco_file_ctrl.c.REF,
+            tb_rco_file_ctrl.c.IS_UPLOADED,
+            tb_rco_file_ctrl.c.IS_PARSED
+        ).where(
+            tb_rco_file_ctrl.c.REF == file_ref
+        )).fetchall()
+        (u.log("Query finalizada.") if verbose else None)
+
+        if (len(select_result) > 0):
+            (u.log("A referência já existe na tabela.") if verbose else None)
+            return select_result[0]._tuple()
+        
+        (u.log("Iniciando inserção dos dados na tabela.") if verbose else None)
+        connection.execute(sa.insert(tb_rco_file_ctrl).values(
+            REF = file_ref,
+            IS_UPLOADED = False,
+            IS_PARSED = False
+        ))
+        (u.log("Dados inseridos com sucesso na tabela de controle.") if verbose else None)        
+
+        return (
+            datetime.strptime(file_ref, "%Y-%m-%d").date(),
+            False,
+            False
+        )
+
+def read_file_ref(file_path: str) -> str:
+    second_line: str = None
+    with open(file_path, "r") as file:
+        second_line = next(islice(file, 1, 2)).strip()
+
+    ref: str = second_line[45:53]
+    return "{}-{}-{}".format(
+        ref[:4],
+        ref[4:6],
+        ref[6:8]
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+u.log("Iniciando processo.")
+u.print_divider(line_break =  True)
+
+u.log("Iniciando conexões com o servidor SQL.")
+engine, metadata = u.get_sql_alchemy_engine()
+u.log("Conexões estabelecidas com sucesso.")
+u.print_divider(line_break =  True)
+
+u.log("Iniciando iteração entre arquivos disponíveis")
+print()
+for file_path in u.list_all_files(r"D:\10_outros\rco_files", verbose = False):
+    u.log(f"Obtendo dados do arquivo: {file_path}")
+    file_ref: str = read_file_ref(file_path)
+    u.log(f"A referência do arquivo é: {file_ref}")
+    print()
+
+    u.log("Verificando se a referência ja existe na tabela de controle. Se não, será inserida.")
+    ref_ctrl: Tuple = get_or_insert_ref_into_ctrl(file_ref, engine, metadata)
+    print()
+
+    u.log("Verificando se o arquivo ja foi subido na tabela de arquivos.")
+    if (ref_ctrl[1] is False):
+        u.log("O arquivo ainda não foi subido. Iniciando upload.")
+
+        u.log("Upload finalizado com sucesso.")
+    else:
+        u.log("O arquivo ja foi subido na tabela de arquivos.")
+    print()
+
+    break
