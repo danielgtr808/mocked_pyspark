@@ -1,0 +1,146 @@
+import sys
+sys.path.append("D:\\10_outros\\")
+
+
+
+from datetime import datetime
+from itertools import islice
+from typing import Dict, List, Tuple
+
+import os
+import pyodbc
+import sqlalchemy as sa
+import utils as u
+
+
+
+def delete_ref_from_file_table(engine: sa.Engine, metadata: sa.MetaData, ref: datetime.date, verbose: bool = True) -> None:
+    with engine.begin() as connection:
+        tb_rco_arqv = sa.Table("TB_RCO_ARQV", metadata, autoload_with=engine)        
+        (u.log(f"Iniciando query para excluir a referência \"{ref.strftime('%Y-%m-%d')}\" da tabela.") if verbose else None)
+
+        connection.execute(
+            sa.delete(tb_rco_arqv).where(
+                tb_rco_arqv.c.REF == ref
+            )
+        )
+        (u.log("Referência excluída com sucesso da tabela.") if verbose else None)
+
+def get_or_insert_ref_into_ctrl(file_ref: str, engine: sa.Engine, metadata: sa.MetaData, verbose: bool = True) -> None:
+    tb_rco_file_ctrl = sa.Table("TB_RCO_FILE_CTRL", metadata, autoload_with=engine)
+    
+    with engine.begin() as connection:
+        (u.log(f"Iniciando query para verificar se a referência \"{file_ref}\" existe na tabela.") if verbose else None)
+        select_result = connection.execute(sa.select(
+            tb_rco_file_ctrl.c.REF,
+            tb_rco_file_ctrl.c.IS_UPLOADED,
+            tb_rco_file_ctrl.c.IS_PARSED
+        ).where(
+            tb_rco_file_ctrl.c.REF == file_ref
+        )).fetchall()
+        (u.log("Query finalizada.") if verbose else None)
+
+        if (len(select_result) > 0):
+            (u.log("A referência já existe na tabela.") if verbose else None)
+            return select_result[0]._tuple()
+        
+        (u.log("Iniciando inserção dos dados na tabela.") if verbose else None)
+        connection.execute(sa.insert(tb_rco_file_ctrl).values(
+            REF = file_ref,
+            IS_UPLOADED = False,
+            IS_PARSED = False
+        ))
+        (u.log("Dados inseridos com sucesso na tabela de controle.") if verbose else None)        
+
+        return (
+            datetime.strptime(file_ref, "%Y-%m-%d").date(),
+            False,
+            False
+        )
+    
+def load_file_to_rco_file_table(engine: sa.Engine, metadata: sa.MetaData, file_path: str, ref: datetime.date, verbose: bool = True) -> None:
+    tb_rco_arqv = sa.Table("TB_RCO_ARQV", metadata, autoload_with = engine)
+    global_line_number = 1
+
+    with engine.begin() as connection:
+        (u.log(f"Iniciando leitura dos chunks do arquivo: {ref.strftime('%Y-%m-%d')}.\n") if verbose else None)
+        chunck_number: int = 1
+        for chunck in u.read_file_in_chunks(file_path, chunk_size = 10):
+            lines_to_upload: List[Dict] = list(map(
+                lambda x:
+                {
+                    "NMR_LINH": x[0],
+                    "LINH": x[1],
+                    "REF": ref.strftime("%Y-%m-%d")
+                },
+                enumerate(chunck, global_line_number)
+            ))
+            global_line_number = lines_to_upload[-1]["NMR_LINH"] + 1
+            (u.log(f"Finalizada leitura do chunk #{chunck_number}, com {len(lines_to_upload)} linhas.\n") if verbose else None)
+
+            (u.log(f"Iniciando subida do chunck no SQL.") if verbose else None)
+            connection.execute(sa.insert(tb_rco_arqv).values(lines_to_upload))
+            (u.log(f"Chunck subido com sucesso.") if verbose else None)
+
+            chunck_number = chunck_number + 1
+
+def mark_ref_as_uploaded(engine: sa.Engine, metadata: sa.MetaData, ref: datetime.date, verbose: bool = True) -> None:
+    tb_rco_file_ctrl = sa.Table("TB_RCO_FILE_CTRL", metadata, autoload_with=engine)
+
+    with engine.begin() as connection:
+        (u.log(f"Iniciando atualização da referência \"{ref.strftime('%Y-%m-%d')}\" como subida.") if verbose else None)
+        connection.execute(
+            tb_rco_file_ctrl.update().values(
+                IS_UPLOADED = True
+            ).where(
+                tb_rco_file_ctrl.c.REF == ref
+            )
+        )
+        (u.log(f"Referência \"{ref.strftime('%Y-%m-%d')}\" atualizada com sucesso.") if verbose else None)
+
+def read_file_ref(file_path: str) -> str:
+    second_line: str = None
+    with open(file_path, "r") as file:
+        second_line = next(islice(file, 1, 2)).strip()
+
+    ref: str = second_line[45:53]
+    return "{}-{}-{}".format(
+        ref[:4],
+        ref[4:6],
+        ref[6:8]
+    )
+
+
+
+u.log("Iniciando processo.")
+u.print_divider(line_break =  True)
+
+u.log("Iniciando conexões com o servidor SQL.")
+engine, metadata = u.get_sql_alchemy_engine()
+u.log("Conexões estabelecidas com sucesso.")
+u.print_divider(line_break =  True)
+
+u.log("Iniciando iteração entre arquivos disponíveis")
+print()
+for file_path in u.list_all_files(r"D:\10_outros\rco_files", verbose = False):
+    u.log(f"Obtendo dados do arquivo: {file_path}")
+    file_ref: str = read_file_ref(file_path)
+    u.log(f"A referência do arquivo é: {file_ref}")
+    print()
+
+    u.log("Verificando se a referência ja existe na tabela de controle. Se não, será inserida.")
+    ref_ctrl: Tuple = get_or_insert_ref_into_ctrl(file_ref, engine, metadata)
+    print()
+
+    u.log("Verificando se o arquivo ja foi subido na tabela de arquivos.")
+    if (ref_ctrl[1] is False):
+        u.log("O arquivo ainda não foi subido. Iniciando upload.")
+        delete_ref_from_file_table(engine, metadata, ref_ctrl[0])
+        load_file_to_rco_file_table(engine, metadata, file_path, ref_ctrl[0])
+        mark_ref_as_uploaded(engine, metadata, ref_ctrl[0])
+        u.log("Upload finalizado com sucesso.")
+    else:
+        u.log("O arquivo ja foi subido na tabela de arquivos.")
+    print()
+
+    break
