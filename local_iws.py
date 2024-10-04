@@ -1,37 +1,77 @@
-from .get_sql_alchemy_engine import get_sql_alchemy_engine
-from .log import log
+import sys
+sys.path.append("D:\\10_outros\\")
 
 import sqlalchemy as sa
 import subprocess
+import time
+import utils as u
 
-def run_mesh(mesh_id: str) -> None:
-    log("Estabelecendo conexão com o SQL")
-    engine, metadata = get_sql_alchemy_engine()
-    log("Conexão estabelecida com sucesso.")
+
+
+def run_mesh(mesh_id: str, sleep_minutes_after_not_success: int = 60) -> None:
+    u.log("Estabelecendo conexão com o SQL")
+    engine, metadata = u.get_sql_alchemy_engine()
+    u.log("Conexão estabelecida com sucesso.")
     print()
 
-    log("Obtendo jobs para a malha: {mesh_id}")
+    u.log(f"Obtendo jobs para a malha: {mesh_id}")
     vw_liws_jobs = sa.Table("VW_LIWS_JOBS", metadata, autoload_with=engine)
+
+    while True:
+        with engine.begin() as connection:
+            select_result = connection.execute(sa.select(
+                vw_liws_jobs.c.REF,
+                vw_liws_jobs.c.JOB_ORDER,
+                vw_liws_jobs.c.JOB_PATH,
+                vw_liws_jobs.c.MESH_ID
+            ).where(
+                vw_liws_jobs.c.MESH_ID == mesh_id
+            )).fetchall()
+
+            if (len(select_result) == 0):
+                u.log(f"Nenhum script a ser executado para a malha \"{mesh_id}\".")
+                return
+
+            select_result = select_result[0]
+            u.log(f"Será feita a execução do script: {select_result[2]}")
+            result = subprocess.run(['python', select_result[2]], capture_output=True, text=True)
+            u.log_script_return(
+                engine,
+                metadata,
+                select_result[0],
+                select_result[1],
+                select_result[3],
+                result.returncode
+            )
+
+            if (result.returncode != 0):
+                u.log(f"A execução do script retornou um código \"{result.returncode}\", portanto, será executado após: {sleep_minutes_after_not_success} minutos.")
+                time.sleep(60*sleep_minutes_after_not_success)
+            else:
+                u.log("Execução bem sucedida. Avançando para o próximo script.")
+            print()
+
+
+
+
+
+from datetime import date, datetime
+
+import sqlalchemy as sa
+
+
+
+def log_script_return(engine: sa.Engine, metadata: sa.MetaData, ref: date, job_order: int, mesh_id: str, job_return: int) -> None:
+    tb_liws_logs = sa.Table("TB_LIWS_LOGS", metadata, autoload_with = engine)
     with engine.begin() as connection:
-        select_result = connection.execute(sa.select(
-            vw_liws_jobs.c.REF,
-            vw_liws_jobs.c.JOB_ORDER,
-            vw_liws_jobs.c.JOB_PATH,
-            vw_liws_jobs.c.MESH_ID
-        ).where(
-            vw_liws_jobs.c.MESH_ID == mesh_id
-        )).fetchall()
-
-        result = subprocess.run(['python', select_result[0][2]], capture_output=True, text=True)
-
-        print(result.stdout)
-        print(result.returncode)
-
-
-
-
-
-
+        connection.execute(sa.insert(tb_liws_logs).values(
+            REF = ref,
+            JOB_ORDER = job_order,
+            MESH_ID = mesh_id,
+            JOB_RETURN = job_return,
+            EXECUTION_TIME = datetime.now()
+        ))
+    
 
 
 
@@ -72,21 +112,12 @@ VALUES
 
 GO
 
-CREATE TABLE [DB_IGE].[dbo].[TB_LIWS_GLOBAL_CONFIGS] (
-	[ID] [int] IDENTITY(1, 1) PRIMARY KEY,
-	[CONFIG_KEY] [varchar](128) NOT NULL,
-	[CONFIG_VALUE] [varchar](256) NOT NULL,
-	[OBS] [varchar](256) NOT NULL
-)
-
-GO
-
 CREATE TABLE [DB_IGE].[dbo].[TB_LIWS_LOGS] (
 	[REF] [date] NOT NULL,
 	[JOB_ORDER] [int] NOT NULL,
 	[MESH_ID] [varchar](128) NOT NULL,
 	[JOB_RETURN] [int] NOT NULL,
-	[EXECTION_TIME] [datetime] NOT NULL
+	[EXECUTION_TIME] [datetime] NOT NULL
 )
 
 GO
