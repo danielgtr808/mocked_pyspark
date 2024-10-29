@@ -1,0 +1,115 @@
+# Define the URL
+url = "https://dbc-e643c2b1-20bb.cloud.databricks.com/ajax-api/2.0/ingestion/staging/personal/files"
+
+# Define the file path
+file_path = r"C:\Users\danie\Downloads\hey.csv"
+file_name = "hey_listen2.csv"
+
+# Get the file size in bytes
+file_size = os.path.getsize(file_path)
+
+# Define headers including the cookies and CSRF token
+headers = {
+    "Cookie": "_dbw_referrer=https://www.google.com/; _db_utm_source__c=web; _db_utm_medium__c=organic_search; OptanonAlertBoxClosed=2024-10-29T02:37:39.217Z; __cf_bm=4eUFe4jeCv6zQ2mZFKjDrzB8MeGAZUZvtdQiiJTrW9U-1730171437-1.0.1.1-qT1SzAl87CEdIBvwg7XNSebGpBtIRyW1LhYPyVV12ELbD2vXU5VSZNihUboo9_YKdj95ZHCfwcWgMoQLMCa68g; _dbw_itm_data=PricingPage-Trial; OptanonConsent=isGpcEnabled=0&datestamp=Tue+Oct+29+2024+00%3A13%3A12+GMT-0300+(Hor%C3%A1rio+Padr%C3%A3o+de+Bras%C3%ADlia)&version=202307.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&consentId=7fc9f569-40ec-4bee-ace9-7c327d01daa8&interactionCount=3&landingPath=NotLandingPage&groups=C0001%3A1%2CC0002%3A0%2CC0003%3A0%2CC0004%3A0&AwaitingReconsent=false&geolocation=BR%3BSP; _vis_opt_exp_445_exclude=1; _vwo_ds=3%241730171585%3A8.177317%3A%3A; _vwo_sn=1; enable-armeria-workspace-server-for-ui-flags=false; workspace-url=dbc-e643c2b1-20bb.cloud.databricks.com; JSESSIONID=auth-9fbb89f95-6bhf9-291ti82rpt9p129wv9vxqx28i.auth-9fbb89f95-6bhf9-",
+    "x-csrf-token": "7fd918f0-0041-40bf-a90a-bfba16ec6058",
+    "x-databricks-allow-4xx-responses": "true",
+    "x-databricks-content-length-0": str(file_size),
+    "x-databricks-org-id": "2275265841815591",
+    "x-databricks-total-files": "1"
+}
+
+files = []
+# Open the file and define it in the 'files' parameter
+# with open(r"C:\Users\danie\Downloads\pikachu.csv", "rb") as file:
+files = {
+    "f1": (file_name,  open(file_path, "rb"), "text/csv")
+}
+
+
+# Send the POST request
+response = requests.post(url, headers=headers, files=files)
+
+# Check the response
+print("Status Code:", response.status_code)
+print("Response:", response.text)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  # Define the URL
+url = "https://dbc-e643c2b1-20bb.cloud.databricks.com/ajax-api/2.0/sql/statements"
+
+catalog = "daniel_baquini_test_workspace"
+schema = "default"
+table_name = "dynamic_table_name"
+
+columns = ["col_1", "col_2", "col_3"]
+columns_str = ", ".join(list(
+    f"`{x}` as `{x}`"
+    for x in columns
+))
+schema_hints = ", ".join(list(
+    f"`{x}` string"
+    for x in columns
+))
+
+directory = response.json()["directory"].replace('//', '/')
+statement = f"create table `{catalog}`.`{schema}`.`{table_name}` \n  COMMENT 'Created by the file upload UI' as select {columns_str} from read_files('{directory}', format => 'CSV', multiLine => \"false\", header => \"true\", delimiter => \",\", escape => \"\\\"\", mergeSchema => \"true\", schemaEvolutionMode => \"none\", inferColumnTypes => \"false\", schemaHints => \"{schema_hints}\");"
+print(statement)
+
+
+
+
+
+
+
+
+
+
+
+# Define headers including the cookies and CSRF token
+headers = {
+    "Cookie": "_dbw_referrer=https://www.google.com/; _db_utm_source__c=web; _db_utm_medium__c=organic_search; OptanonAlertBoxClosed=2024-10-29T02:37:39.217Z; __cf_bm=4eUFe4jeCv6zQ2mZFKjDrzB8MeGAZUZvtdQiiJTrW9U-1730171437-1.0.1.1-qT1SzAl87CEdIBvwg7XNSebGpBtIRyW1LhYPyVV12ELbD2vXU5VSZNihUboo9_YKdj95ZHCfwcWgMoQLMCa68g; _dbw_itm_data=PricingPage-Trial; OptanonConsent=isGpcEnabled=0&datestamp=Tue+Oct+29+2024+00%3A13%3A12+GMT-0300+(Hor%C3%A1rio+Padr%C3%A3o+de+Bras%C3%ADlia)&version=202307.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&consentId=7fc9f569-40ec-4bee-ace9-7c327d01daa8&interactionCount=3&landingPath=NotLandingPage&groups=C0001%3A1%2CC0002%3A0%2CC0003%3A0%2CC0004%3A0&AwaitingReconsent=false&geolocation=BR%3BSP; _vis_opt_exp_445_exclude=1; _vwo_ds=3%241730171585%3A8.177317%3A%3A; _vwo_sn=1; enable-armeria-workspace-server-for-ui-flags=false; workspace-url=dbc-e643c2b1-20bb.cloud.databricks.com; JSESSIONID=auth-9fbb89f95-6bhf9-291ti82rpt9p129wv9vxqx28i.auth-9fbb89f95-6bhf9-",
+    "x-csrf-token": "7fd918f0-0041-40bf-a90a-bfba16ec6058"
+}
+
+# Define the JSON payload
+payload = {
+    "statement": statement,
+    "warehouse_id": "4b5e5cd6e55ef731"
+}
+
+# Send the POST request
+response = requests.post(url, headers=headers, json=payload)
+
+# Check the response
+print("Status Code:", response.status_code)
+print("Response:", response.text)
