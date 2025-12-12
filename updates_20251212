@@ -1,0 +1,41 @@
+PctChange_Qty = 
+VAR s0 = SUM([qtrans_bcria_M-0])
+VAR s1 = SUM([qtrans_bcria_M-1])
+RETURN
+IF( s1 = 0, BLANK(), DIVIDE(s0 - s1, s1) )
+
+
+nrRankingEvolucao = 
+VAR T =
+    SUMMARIZE(
+        ALLSELECTED( powerbi ),
+        powerbi[cag_bcria],
+        powerbi[ccta_bcria]
+    )
+RETURN
+RANKX( T, CALCULATE( [PctChange_Qty] ), , DESC, DENSE )
+
+
+nrRankingInvolucao = 
+VAR T =
+    SUMMARIZE(
+        ALLSELECTED( powerbi ),
+        powerbi[cag_bcria],
+        powerbi[ccta_bcria]
+    )
+RETURN
+RANKX( T, CALCULATE( [PctChange_Qty] ), , ASC, DENSE )
+
+
+cdExibirNoVisualRanking = 
+VAR IsTop15_Up   = IF( [nrRankingEvolucao]  <= 15, 1, 0 )
+VAR IsTop15_Down = IF( [nrRankingInvolucao] <= 15, 1, 0 )
+RETURN
+IF( IsTop15_Up = 1 || IsTop15_Down = 1, 1, 0 )
+
+
+
+
+despivotar qtrans_bcria e vtrans_bcria
+merge do "Attribute" (coluna que fica os labels qtrans_bcria e vtrans_bcria) e rper_reltv  -> chamar de dsPeriodoRelativo
+Pivotar dsPeriodoRelativo com Value
