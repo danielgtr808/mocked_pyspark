@@ -1,3 +1,59 @@
+_anchors:
+  ing_path: &ing_path
+    domain: subject
+    schema: transacoes_ing
+  wks_path: &wks_path
+    domain: subject
+    schema: my_subject_wks
+
+pr:
+  checkpoint:
+    path:
+      layer: wks_db
+      name: clientes_ctrl
+
+  sources:
+    - alias: vw_clientes
+      load:
+        strategy: delta
+        batch:
+          size: 10
+      path:
+        domain: subject
+        schema: cliente_ing
+        name: clientes
+
+  target:
+    base_path:
+      layer: ucs_db
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Annotated, Any, List, Literal, Optional, Union
