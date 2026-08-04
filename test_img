@@ -1,41 +1,5 @@
-_anchors:
-  ing_path: &ing_path
-    domain: subject
-    schema: transacoes_ing
-  wks_path: &wks_path
-    domain: subject
-    schema: my_subject_wks
-
-dev:
-  checkpoint:
-    path:
-      <<: *wks_path
-      name: transacoes_ctrl
-  sources:
-    - alias: vw_transacoes
-      load:
-        strategy: "full"
-      path:
-          <<: *ing_path
-          name: transacoes_hist
-
-    - alias: vw_transacoes
-      load:
-        strategy: "delta"
-        batch:
-          size: 125
-      path:
-        <<: *ing_path
-        name: transacoes
-
-  target:
-    <<: *wks_path
-
-
-
-
 from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Annotated, Any, List, Literal, Optional, Union
 
 
@@ -49,9 +13,11 @@ class StrictModel(BaseModel):
 class LoadDeltaBatchConfig(StrictModel):
     size: int = Field(gt=0)
 
-class PathConfig(StrictModel):
+class BasePathConfig(StrictModel):
     domain: str
     schema_name: str = Field(alias="schema")
+   
+class PathConfig(BasePathConfig):
     name: str
 
 class CheckpointConfig(StrictModel):
@@ -75,14 +41,106 @@ class SourceConfig(StrictModel):
     load: LoadConfig
     path: PathConfig
 
-class TargetPathConfig(StrictModel):
-    domain: str
-    schema_name: str = Field(alias="schema")
+class TargetConfig(StrictModel):
+    base_path: BasePathConfig
 
 class SmartCslConfig(StrictModel):
     checkpoint: CheckpointConfig | None = None
     sources: list[SourceConfig]
-    target: TargetPathConfig
+    target: TargetConfig
+
+    @field_validator("checkpoint", mode = "before")
+    @classmethod
+    def checkpoint_validator_before(cls, value, info) -> dict:
+        path = value["path"]
+        if ("layer" in path):
+            domain, schema = info.context["layer_mapper"][path["layer"]]
+            path = {
+                "domain": domain,
+                "schema": schema,
+                "name": path["name"]
+            }
+
+        return {
+            **value,
+            "path": path
+        }
+
+    @field_validator("target", mode = "before")
+    @classmethod
+    def target_validator_before(cls, value, info) -> dict:
+        base_path = value["base_path"]
+        if ("layer" in base_path):
+            domain, schema = info.context["layer_mapper"][base_path["layer"]]
+            base_path = {
+                "domain": domain,
+                "schema": schema
+            }
+
+        return {
+            **value,
+            "base_path": base_path
+        }
+
+
+
+def cleanup_temp_objects(spark: SparkSession, verbose: bool = True) -> dict:
+    """
+    Dropa todas as temporary views e temporary functions da sessão.
+    
+    Args:
+        spark: SparkSession ativa
+        verbose: Se True, printa o que está sendo dropado
+    
+    Returns:
+        Dict com contadores: {"views_dropped": int, "functions_dropped": int}
+    """
+    views_dropped = 0
+    functions_dropped = 0
+    
+    # Lista e dropa todas as temporary views
+    try:
+        temp_views = [v.name for v in spark.catalog.listTables() if v.isTemporary]
+        
+        for view_name in temp_views:
+            try:
+                spark.catalog.dropTempView(view_name)
+                views_dropped += 1
+                if verbose:
+                    print(f"✓ Dropped temp view: {view_name}")
+            except Exception as e:
+                if verbose:
+                    print(f"✗ Failed to drop temp view {view_name}: {e}")
+    except Exception as e:
+        if verbose:
+            print(f"✗ Failed to list temp views: {e}")
+    
+    # Lista e dropa todas as temporary functions
+    try:
+        temp_functions = [f['function'] for f in spark.sql("SHOW USER FUNCTIONS LIKE '*'").collect()]
+        
+        for func_name in temp_functions:
+            try:
+                spark.sql(f"DROP TEMPORARY FUNCTION IF EXISTS {func_name}")
+                functions_dropped += 1
+                if verbose:
+                    print(f"✓ Dropped temp function: {func_name}")
+            except Exception as e:
+                if verbose:
+                    print(f"✗ Failed to drop temp function {func_name}: {e}")
+    except Exception as e:
+        if verbose:
+            print(f"✗ Failed to list temp functions: {e}")
+    
+    result = {
+        "views_dropped": views_dropped,
+        "functions_dropped": functions_dropped
+    }
+    
+    if verbose:
+        print(f"\n📊 Summary: {views_dropped} views, {functions_dropped} functions dropped")
+    
+    return result
 
 
 
@@ -95,205 +153,207 @@ import json
 with open("/Workspace/Users/danielbaquini@gmail.com/tabela_a_consl/smart_csl.yaml") as f:
     yaml_data = yaml.safe_load(f)
 
-print(json.dumps(yaml_data["dev"], indent=4, ensure_ascii=False))
 
-# adapter = TypeAdapter(list[SourceConfig])
+environment: str = "pr"
+layer_mapper = {
+    "dv": {
+        "ddm_db": ["subject", "my_subject_ddm"],
+        "tgt_db": ["subject", "my_subject_tgt"],
+        "ucs_db": ["subject", "my_subject_ucs"],
+        "wks_db": ["subject", "my_subject_wks"]
+    },
+    "ex": {
+        "ddm_db": ["subject", "my_subject_ddm"],
+        "tgt_db": ["subject", "my_subject_tgt"],
+        "ucs_db": ["subject", "my_subject_ucs"],
+        "wks_db": ["subject", "my_subject_wks"]
+    },
+    "ho": {
+        "ddm_db": ["subject", "my_subject_ddm"],
+        "tgt_db": ["subject", "my_subject_tgt"],
+        "ucs_db": ["subject", "my_subject_ucs"],
+        "wks_db": ["subject", "my_subject_wks"]
+    },
+    "pr": {
+        "ddm_db": ["subject", "my_subject_ddm"],
+        "tgt_db": ["subject", "my_subject_tgt"],
+        "ucs_db": ["subject", "my_subject_ucs"],
+        "wks_db": ["subject", "my_subject_wks"]
+    }
+}
+
+
+# print(json.dumps(yaml_data[environment], indent = 4, ensure_ascii = False))
+
 adapter = TypeAdapter(SmartCslConfig)
-smart_csl_config: SmartCslConfig = adapter.validate_python(yaml_data["dev"])
+smart_csl_config: SmartCslConfig = (
+    adapter
+    .validate_python(
+        yaml_data[environment],
+        context = {
+            "layer_mapper": layer_mapper[environment]
+        }
+    )
+)
+print(json.dumps(smart_csl_config.model_dump(), indent=4, ensure_ascii=False))
 
 
-from pyspark.sql import DataFrame, functions as f, Row, SparkSession
+
+
+from pyspark.sql import functions as f, Row, types as t
 from typing import Generator
 
+temporary_functions: list[str] = [
+    """
+        CREATE OR REPLACE TEMPORARY FUNCTION lpad_dot9(cpf STRING)
+        RETURNS STRING
+        RETURN concat_ws('.', split(lpad(cpf, 9, '0'), '(?<=\\G.{3})'))
+    """,
+    """
+        CREATE OR REPLACE TEMPORARY FUNCTION parse_date_flexible(date_str STRING)
+        RETURNS DATE
+        RETURN COALESCE(
+            TRY_TO_DATE(date_str, 'yyyy-MM-dd'),
+            TRY_TO_DATE(date_str, 'yyyy.MM.dd'),
+            TRY_TO_DATE(date_str, 'yyyy/MM/dd'),
+            TRY_TO_DATE(date_str, 'dd.MM.yyyy'),
+            TRY_TO_DATE(date_str, 'ddMMyyyy'),
+            TRY_TO_DATE(date_str, 'yyyyMMdd')
+        )
+    """
+]
 
+def get_common_columns(data_frame_1: DataFrame, data_frame_2: DataFrame) -> List[str]:
+    return list(set(data_frame_1.columns) & set(data_frame_2.columns))
 
-def build_table_path(path_config: PathConfig) -> str:
-    return f"{path_config.domain}.{path_config.schema_name}.{path_config.name}"
-
-def calculate_delta(spark_session: SparkSession, table_path: PathConfig, checkpoint_config: CheckpointConfig) -> DataFrame:
-    source_partitions: DataFrame = spark_session.sql(f"show partitions {build_table_path(table_path)}")
-
-    if (not table_exists(spark_session, checkpoint_config.path)):
-        return source_partitions
+def filter_partitions(
+    sas: SparkAcessStrategy,
+    partitions: DataFrame,
+    checkpoint_config: CheckpointConfig
+) -> DataFrame:
+    p: PathConfig = checkpoint_config.path
+    checkpoint_data_path: list[str] = [p.domain, p.schema_name, p.name]
     
-    checkpoint: DataFrame = spark_session.table(build_table_path(checkpoint_config.path))
-    common_columns: List[str] = get_common_columns(source_partitions, checkpoint)
+    checkpoint: Optional[DataFrame] = sas.get_data_if_exists(data_path = checkpoint_data_path)
+    if (checkpoint is None):
+        print("Tabela controle não existe, retornado partições completas.")
+        return partitions
+    
+    common_columns: List[str] = get_common_columns(partitions, checkpoint)
 
     return (
-        source_partitions
+        partitions
         .join(
             checkpoint,
             how = "leftanti",
             on = common_columns
         )
         .select(
-            source_partitions["*"]
+            partitions["*"]
         )
     )
 
-def get_common_columns(data_frame_1: DataFrame, data_frame_2: DataFrame) -> List[str]:
-    return list(set(data_frame_1.columns) & set(data_frame_2.columns))
+def generate_partitions_batch(
+    sas: SparkAcessStrategy,
+    partitions: DataFrame,
+    load_delta_config: LoadDeltaConfig
+) -> Generator[DataFrame, None, None]:
+    if load_delta_config.batch is None:
+        yield partitions
+        return
 
-def divide_data_frame_into_batches(spark_session: SparkSession, data_frame_to_divide: DataFrame, batch_size: int) -> Generator[DataFrame, None, None]:
-    partitions: list[Row] = (
-        data_frame_to_divide
+    partitions_rows: list[Row] = (
+        partitions
         .orderBy(
-            *[f.asc(c) for c in data_frame_to_divide.columns]
+            [f.asc(c) for c in partitions.columns]
         )
         .collect()
     )
+    rows_schema: t.StructType = partitions.schema
 
-    for index in range(0, len(partitions), batch_size):
+    for i in range(0, len(partitions_rows), load_delta_config.batch.size):
         yield (
-            spark_session
+            sas
+            .spark_session
             .createDataFrame(
-                data = partitions[index:index+batch_size],
-                schema = data_frame_to_divide.schema
+                data=partitions_rows[i:i+load_delta_config.batch.size],
+                schema=rows_schema
             )
         )
 
-def table_exists(spark_session: SparkSession, path_config: PathConfig) -> bool:
-    table_path = build_table_path(path_config)
-    return spark_session.catalog.tableExists(table_path)
+def delta_path(
+    sas: SparkAcessStrategy,
+    checkpoint_config: CheckpointConfig,
+    source_config: SourceConfig,
+    load_delta_config: LoadDeltaConfig
+) -> Generator[DataFrame, None, None]:
+    p: PathConfig = source_config.path
+    source_data_path: list[str] = [p.domain, p.schema_name, p.name]
+    source_data: DataFrame = sas.get_data(data_path = source_data_path)
+    source_partitions: DataFrame = filter_partitions(
+        sas,
+        sas.get_data_partitions(data_path = source_data_path),
+        checkpoint_config
+    )
 
-def sql_runner(
-    sql_to_run: str,
-    spark_session: SparkSession,
-    views_to_register: dict[str, DataFrame],
-    target_path_config: TargetPathConfig
-) -> None:
-    try:
-        for alias, data in views_to_register.items():
-            data.createOrReplaceTempView(alias)
-
-        sql: str = f"use catalog pr_{target_path_config.domain};"
-        print(f"Executando o SQL: {sql}.")
-        spark_session.sql(sql)
-        
-        sql: str = f"use schema {target_path_config.schema_name};"
-        print(f"Executando o SQL: {sql}.")
-        spark_session.sql(sql)
-        
-        print(f"Executando o SQL:\n{sql_to_run}")
-        spark_session.sql(sql_to_run)
-
-    finally:
-        for alias in views_to_register.keys():
-            spark_session.catalog.dropTempView(alias)
-
-
-transform_and_write_sql: str
-with open("/Workspace/Users/danielbaquini@gmail.com/tabela_a_consl/query.sql", "r") as file:
-    transform_and_write_sql = file.read()
-
-for source in smart_csl_config.sources:
-    source_table_path: str = build_table_path(source.path)
-    if (not table_exists(spark_session, source.path)):
-        print(f"A tabela \"{source_table_path}\" não existe.")
-        continue
-
-    source_dataframe: DataFrame = spark_session.table(source_table_path)
-
-    if (isinstance(source.load, LoadDeltaConfig)):
-        if (not smart_csl_config.checkpoint):
-            print(f"O checkpoint não foi informado, portanto, não é possível seguir com uma ingestão do tipo delta.")
-            continue
-
-        partitions_to_ingest: DataFrame = calculate_delta(spark_session, source.path, smart_csl_config.checkpoint.path)
-        common_columns: List[str] = get_common_columns(source_dataframe, partitions_to_ingest)
-        
-        batches_generator: Generator[DataFrame, None, None]
-        if (source.load.batch):
-            batches_generator = divide_data_frame_into_batches(spark_session, partitions_to_ingest, source.load.batch.size)
-        else:
-            batches_generator = (partitions_to_ingest for _ in range(1))
-
-        for batch in batches_generator:
-            print("Executando as partições:")
-            [print(item) for item in batch.collect()]
-
-            source_delta: DataFrame = (
-                source_dataframe
-                .join(
-                    batch,
-                    how = "inner",
-                    on = common_columns
-                )
-            )
-            sql_runner(
-                transform_and_write_sql,
-                spark_session,
-                {
-                    source.alias: source_delta,
-                    "__current_partitions": batch
-                },
-                smart_csl_config.target,
-                
-            )
-    else:
-        sql_runner(
-            transform_and_write_sql,
-            spark_session,
-            {
-                source.alias: source_delta
-            },
-            smart_csl_config.target,
-        )
-
-
-
-
-from pyspark.sql import DataFrame, SparkSession
-
-
-
-def run_sql(spark_session: SparkSession, sql_path: str) -> None:
-    with open(sql_path, "r") as f:
-        sql = f.read()
-    print(sql)
-    display(spark_session.sql(sql))
-
-def show_partitions(spark_session: SparkSession, path_config: PathConfig) -> DataFrame:
-    table_path = build_table_path(path_config)
-    return spark_session.sql(f"SHOW PARTITIONS {table_path}")
-
-source_config = smart_csl_config.sources[0]
-spark_session = spark
-sql_path: str = "/Workspace/Users/danielbaquini@gmail.com/tabela_a_consl/query.sql"
-
-if (isinstance(source_config.load, LoadDeltaConfig)):
-    source_partitions: DataFrame = show_partitions(spark_session, source_config.path)
-
-    if (table_exists(spark_session, source_config.load.checkpoint.path)):
-        checkpoint: DataFrame = spark_session.table(build_table_path(source_config.load.checkpoint.path))
-        common_columns: List[str] = list(set(source_partitions.columns) & set(checkpoint.columns))
-        source_partitions = source_partitions.join(checkpoint, common_columns, "left_anti")
-
-
-    source_table: DataFrame = spark_session.table(build_table_path(source_config.path))
-    common_columns: List[str] = list(set(source_partitions.columns) & set(source_table.columns))
-
-    while source_partitions.count() > 0:
-        batch = source_partitions
-        batch = batch.limit(source_config.load.batch.size) if source_config.load.batch else batch
-        print(f"Executando as partições: {batch.collect()}.")
-        (
-            source_table
+    for partition_batch in generate_partitions_batch(
+        sas,
+        source_partitions,
+        load_delta_config
+    ):
+        print(partition_batch.collect())
+        common_columns: List[str] = get_common_columns(source_data, partition_batch)
+        print("common_columns:", common_columns)
+        yield (
+            source_data
             .join(
-                batch,
+                partition_batch,
                 how = "inner",
                 on = common_columns
             )
             .select(
-                source_table["*"]
+                source_data["*"]
             )
-            .createOrReplaceTempView(source_config.alias)
+
         )
-        run_sql(spark_session, sql_path)
+        
+    return
+
+def full_path(
+    sas: SparkAcessStrategy,
+    checkpoint_config: CheckpointConfig,
+    source_config: SourceConfig,
+    load_delta_config: LoadDeltaConfig
+) -> Generator[DataFrame, None, None]:
+    p: PathConfig = source_config.path
+    source_data_path: list[str] = [p.domain, p.schema_name, p.name]
+
+    yield sas.get_data(data_path = source_data_path)
+    return 
+
+
+for source_config in smart_csl_config.sources:
+    p: PathConfig = source_config.path
+    source_data_path: list[str] = [p.domain, p.schema_name, p.name]
+
+    if (not sas.data_exists(data_path = source_data_path)):
+        print(f"O dado {source_data_path} não existe.")
+        continue
+
+    generator = None
+    if isinstance(source_config.load, LoadDeltaConfig):
+        generator = delta_path
+    else:
+        generator = full_path
+
+    for source_data in generator(sas, smart_csl_config.checkpoint, source_config, source_config.load):
+        for temporary_function_sql in temporary_functions:
+            sas.spark_session.sql(temporary_function_sql)
+
+        display(source_data)
+        source_data.createOrReplaceTempView(source_config.alias)
+
+        b: BasePathConfig = smart_csl_config.target.base_path
+        sas.use_schema(data_path = [b.domain, b.schema_name])
+
         break
-
-else:
-    spark_session.table(build_table_path(source_config.path)).createOrReplaceTempView(source_config.alias)
-    run_sql(spark_session, sql_path)
-    
-
